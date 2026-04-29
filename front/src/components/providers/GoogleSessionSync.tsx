@@ -1,73 +1,72 @@
 "use client";
 import { useSession } from "next-auth/react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { useRouter } from "next/navigation";
 import Swal from "sweetalert2";
+
+const APIURL = process.env.NEXT_PUBLIC_API_URL;
 
 export default function GoogleSessionSync() {
   const { data: session, status } = useSession();
-  const { setUserData } = useAuth();
+  const { checkSession } = useAuth();
+  const synced = useRef(false);
+  const router = useRouter();
 
   useEffect(() => {
-    if (status !== "authenticated" || !session?.backendToken) return;
+    if (status !== "authenticated" || !session?.user) return;
+    if (synced.current) return;
+    synced.current = true;
 
-    if (
-      session.isNewGoogleUser === undefined ||
-      session.isNewGoogleUser === null
-    )
-      return;
+    const syncSession = async () => {
+      try {
+        const googleRes = await fetch(`${APIURL}/auth/google`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            email: session.user?.email,
+            name: session.user?.name,
+            googleId: session.user?.image,
+            picture: session.user?.image,
+          }),
+        });
 
-    const alreadyShown = localStorage.getItem("googleToastShown");
-    if (alreadyShown === session.backendToken) return;
+        if (!googleRes.ok) return;
 
-    localStorage.setItem("googleToastShown", session.backendToken);
+        await checkSession();
 
-    const stored = localStorage.getItem("userSession");
-    if (!stored) {
-      const googleSession = {
-        token: session.backendToken,
-        user: {
-          id: session.user?.id || "",
-          email: session.user?.email || "",
-          first_name: session.user?.name?.split(" ")[0] || "",
-          last_name: session.user?.name?.split(" ").slice(1).join(" ") || "",
-          role: "user",
-          address: "",
-          phone: "",
-        },
-      };
-      localStorage.setItem("userSession", JSON.stringify(googleSession));
-      localStorage.setItem("userToken", session.backendToken);
-      setUserData(googleSession);
-    }
+        if (!session.isNewGoogleUser) {
+          Swal.fire({
+            icon: "success",
+            title: "Hola de nuevo",
+            text: "Sesión iniciada con Google.",
+            confirmButtonColor: "#e76f51",
+            timer: 2500,
+            showConfirmButton: false,
+          }).then(() => {
+            router.push("/");
+          });
+          return;
+        }
 
-    const esNuevo = session.isNewGoogleUser;
+        Swal.fire({
+          icon: "success",
+          title: "¡Bienvenido a TrackiFly!",
+          text: "Tu cuenta fue creada con Google.",
+          confirmButtonColor: "#e76f51",
+          timer: 3000,
+          showConfirmButton: false,
+        }).then(() => {
+          router.push("/");
+        });
+      } catch (err) {
+        console.error("Error sincronizando sesión de Google:", err);
+      }
+    };
 
-    if (!esNuevo) {
-      Swal.fire({
-        icon: "success",
-        title: "Hola denuevo",
-        text: "Sesión iniciada con Google.",
-        confirmButtonColor: "#e76f51",
-        timer: 2500,
-        showConfirmButton: false,
-      }).then(() => {
-        window.location.href = "/";
-      });
-      return;
-    }
-
-    Swal.fire({
-      icon: "success",
-      title: "¡Bienvenido a TrackiFly!",
-      text: "Tu cuenta fue creada con Google.",
-      confirmButtonColor: "#e76f51",
-      timer: 3000,
-      showConfirmButton: false,
-    }).then(() => {
-      window.location.href = "/";
-    });
-  }, [status, session, setUserData]);
+    void syncSession();
+  }, [status, session, router, checkSession]);
 
   return null;
 }
